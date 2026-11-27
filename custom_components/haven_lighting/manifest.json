@@ -6,6 +6,6 @@
   "documentation": "https://github.com/mickeyschwab/haven-hass",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/mickeyschwab/haven-hass/issues",
-  "requirements": ["havenlighting @ git+https://github.com/cecilkootz/haven-python.git@fix/v2-light-api"],
+  "requirements": ["havenlighting@git+https://github.com/cecilkootz/haven-python.git@fix/v2-light-api"],
   "version": "0.5.0"
 } 

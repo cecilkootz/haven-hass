@@ -14,6 +14,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .brightness import ha_to_haven_brightness, haven_to_ha_brightness
 from .const import DOMAIN
 from .coordinator import HavenConfigEntry, HavenCoordinator
 
@@ -48,9 +49,8 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
     _attr_supported_color_modes = {ColorMode.ONOFF, ColorMode.BRIGHTNESS}
 
     # Haven reports brightness on a 0-10 scale (lightBrightnessId); Home
-    # Assistant uses 0-255. Convert both ways, clamping to the 1-10 range the
-    # API accepts for a set command.
-    HAVEN_BRIGHTNESS_MAX = 10
+    # Assistant uses 0-255. Conversion lives in brightness.py so it can be
+    # unit-tested without Home Assistant installed.
 
     def __init__(
         self, coordinator: HavenCoordinator, light_id: int, location_device_id: str
@@ -84,17 +84,14 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
     @property
     def brightness(self) -> int:
         """Return the brightness of this light between 0..255."""
-        haven_brightness = self.coordinator.data[self._light_id].brightness
-        return round(haven_brightness * 255 / self.HAVEN_BRIGHTNESS_MAX)
+        return haven_to_ha_brightness(self.coordinator.data[self._light_id].brightness)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on, optionally setting brightness."""
         light = self.coordinator.data[self._light_id]
         haven_brightness = None
         if (ha_brightness := kwargs.get(ATTR_BRIGHTNESS)) is not None:
-            haven_brightness = max(
-                1, round(ha_brightness * self.HAVEN_BRIGHTNESS_MAX / 255)
-            )
+            haven_brightness = ha_to_haven_brightness(ha_brightness)
         await self.hass.async_add_executor_job(
             lambda: light.turn_on(brightness=haven_brightness)
         )
