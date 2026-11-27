@@ -32,6 +32,19 @@ This integration allows you to control Haven Lighting devices through Home Assis
 3. Search for "Haven Lighting"
 4. Enter your Haven account credentials
 
+## Releasing
+
+Releases are cut by the `Release` workflow, in two ways:
+
+- **Tag push:** bump `version` in `custom_components/haven_lighting/manifest.json`, merge to `main`, then push a matching tag:
+  ```sh
+  git tag v0.5.0
+  git push origin v0.5.0
+  ```
+- **Actions UI:** go to Actions → **Release** → **Run workflow** — it tags the current `main` with the manifest version for you.
+
+Either way the workflow validates that the tag matches the manifest version, runs the test suite, builds `haven_lighting-v<version>.zip`, and creates the GitHub release with generated notes. HACS picks up the release from the tag.
+
 ## Support
 
 - For bugs and feature requests, please [open an issue](https://github.com/mickeyschwab/haven-hass/issues)
