@@ -17,7 +17,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
       - name: Run tests
-        run: pytest tests/ -v
+        run: pytest tests/ -v --ignore=tests/ha
+
+  home-assistant:
+    # Runs the integration inside a real Home Assistant core. Bump the
+    # pytest-homeassistant pin (it tracks Home Assistant releases 1:1) to
+    # test against a newer Home Assistant.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Home Assistant and the integration requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest-homeassistant==2026.11.3
+          python -c 'import json; print("\n".join(json.load(open("custom_components/haven_lighting/manifest.json"))["requirements"]))' > requirements-component.txt
+          pip install -r requirements-component.txt
+      - name: Run Home Assistant tests
+        run: pytest tests/ha -v
 
   version-check:
     runs-on: ubuntu-latest

@@ -35,6 +35,19 @@ This integration allows you to control Haven Lighting devices through Home Assis
 3. Search for "Haven Lighting"
 4. Enter your Haven account credentials
 
+## Development
+
+The unit tests in `tests/` run with plain `pytest`. The Home Assistant tests in
+`tests/ha/` run the integration inside a real Home Assistant core and need
+Python 3.14 plus the `pytest-homeassistant` release matching the Home Assistant
+version under test:
+
+```sh
+pip install pytest-homeassistant==2026.11.3
+pip install "havenlighting@git+https://github.com/cecilkootz/haven-python.git@724d2d86a39016ff86ef5635bef6aba29e8be256"
+pytest tests/ha
+```
+
 ## Releasing
 
 Releases are cut by the `Release` workflow, in two ways:

@@ -61,7 +61,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest
-          pytest tests/ -q
+          pytest tests/ -q --ignore=tests/ha
 
       - name: Build the install zip
         run: |
