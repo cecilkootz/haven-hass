@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release — defaults to the manifest version"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve and validate the release version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            VERSION="${{ inputs.version }}"
+            if [ -z "$VERSION" ]; then
+              VERSION="$(python -c 'import json; print(json.load(open("custom_components/haven_lighting/manifest.json"))["version"])')"
+            fi
+            TAG="v${VERSION}"
+          fi
+          VERSION="${TAG#v}"
+          MANIFEST="$(python -c 'import json; print(json.load(open("custom_components/haven_lighting/manifest.json"))["version"])')"
+          if [ "$VERSION" != "$MANIFEST" ]; then
+            echo "::error::tag $TAG does not match the manifest version $MANIFEST — bump custom_components/haven_lighting/manifest.json first"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create the tag if it does not exist yet
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Run tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pytest tests/ -q
+
+      - name: Build the install zip
+        run: |
+          cd custom_components
+          zip -r "../haven_lighting-v${{ steps.version.outputs.version }}.zip" haven_lighting
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP="haven_lighting-v${VERSION}.zip"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — refreshing the zip asset"
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$ZIP" --title "$TAG" --generate-notes
+          fi
