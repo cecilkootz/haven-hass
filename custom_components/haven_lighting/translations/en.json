@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Enter your Haven Lighting account credentials.",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Authentication expired for {name}",
+        "description": "Re-enter the password for the Haven Lighting account {email}.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Account is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    }
+  },
+  "services": {
+    "rename": {
+      "name": "Rename light",
+      "description": "Renames an individual Haven light on Haven's servers. Not supported for zones (zones are renamed in the Haven app).",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "The new name for the light."
+        }
+      }
+    },
+    "set_pattern_speed": {
+      "name": "Set pattern speed",
+      "description": "Sets the animation speed of a Haven pattern (1/2/3 Wave, Sparkle, Cascade, USA, Warm/Cool/All Colors) on a scale of 1 (slow) to 63 (fast). Has no effect while a solid color is active.",
+      "fields": {
+        "speed": {
+          "name": "Speed",
+          "description": "Pattern speed from 1 (slow) to 63 (fast)."
+        }
+      }
+    }
+  }
+}

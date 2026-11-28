@@ -2,22 +2,15 @@
 
 Control your Haven Lighting devices through Home Assistant.
 
-{% if installed %}
 ## Features
 
-- Automatic discovery of Haven lights
-- Support for on/off control
-- Brightness control
-- Location-based organization
-
-{% if version_installed.replace("v", "").replace(".","") | int < 010  %}
-## Breaking Changes
-
-- None at this time
-{% endif %}
+- Automatic discovery of Haven lights and zones
+- On/off, brightness and color control
+- Animated patterns as effects, with a pattern-speed service
+- Light renaming via the `haven_lighting.rename` service
+- Haven scenes as Home Assistant scene entities
 
 ## Links
 
 - [Documentation](https://github.com/mickeyschwab/haven-hass)
 - [Report an issue](https://github.com/mickeyschwab/haven-hass/issues)
-{% endif %} 
