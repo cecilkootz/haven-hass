@@ -4,7 +4,7 @@ This integration allows you to control Haven Lighting devices through Home Assis
 
 ## Features
 
-- Automatic discovery of Haven lights and zones
+- Automatic discovery of Haven lights and zones, grouped on a single **Home** device: Haven's ALL ZONES zone is the device's own light, and each other zone or light is a named light on it
 - On/off control
 - Brightness control
 - Color control (Haven's full color and white-temperature catalog)

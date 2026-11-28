@@ -1,9 +1,9 @@
 rename:
   name: Rename light
   description: >-
-    Renames an individual Haven light on Haven's servers and updates its
-    device name in Home Assistant. Not supported for zones (zones are
-    renamed in the Haven app).
+    Renames an individual Haven light on Haven's servers; its name in Home
+    Assistant follows. Not supported for zones (zones are renamed in the
+    Haven app).
   target:
     entity:
       integration: haven_lighting

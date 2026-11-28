@@ -61,11 +61,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: HavenConfigEntry) -> boo
 
 
 def _current_identifiers(entry: HavenConfigEntry) -> set[tuple[str, str]]:
-    """Device identifiers for everything Haven currently reports."""
-    coordinator = entry.runtime_data
-    return {location_identifier(coordinator.location.id)} | {
-        (DOMAIN, key) for key in coordinator.data
-    }
+    """Device identifiers in use: the one Home device holds every entity."""
+    return {location_identifier(entry.runtime_data.location.id)}
 
 
 @callback
@@ -98,10 +95,11 @@ def _async_migrate_zone_unique_ids(
 def _async_remove_stale_devices(hass: HomeAssistant, entry: HavenConfigEntry) -> None:
     """Remove this entry's devices that are empty and no longer reported.
 
-    Covers the per-scene devices from 0.6.x and the bare-number device
-    identifiers from before 0.7.0: by now their entities have moved to the
-    current devices, so they are left empty. Devices that still hold an
-    entity are kept; the user can delete those from the UI.
+    Covers the per-scene devices from 0.6.x, the bare-number devices from
+    before 0.7.0 and the per-light/per-zone devices from 0.7.x: by now their
+    entities have moved to the Home device, so they are left empty. Devices
+    that still hold an entity are kept; the user can delete those from the
+    UI.
     """
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -119,7 +117,7 @@ def _async_remove_stale_devices(hass: HomeAssistant, entry: HavenConfigEntry) ->
 async def async_remove_config_entry_device(
     hass: HomeAssistant, entry: HavenConfigEntry, device_entry: dr.DeviceEntry
 ) -> bool:
-    """Allow deleting a device from the UI once Haven no longer reports it."""
+    """Allow deleting any device but the Home device from the UI."""
     if entry.state is not ConfigEntryState.LOADED:
         return True
     return not device_entry.identifiers & _current_identifiers(entry)
