@@ -73,8 +73,8 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
     """Representation of a Haven light or zone."""
 
     _attr_has_entity_name = True
-    _attr_color_mode = ColorMode.COLOR
-    _attr_supported_color_modes = {ColorMode.BRIGHTNESS, ColorMode.COLOR}
+    _attr_color_mode = ColorMode.HS
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS, ColorMode.HS}
 
     # Haven reports brightness on a 0-10 scale (lightBrightnessId); Home
     # Assistant uses 0-255. Conversion lives in brightness.py so it can be
