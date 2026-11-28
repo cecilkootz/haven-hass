@@ -12,7 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
+from .const import location_identifier
 from .coordinator import HavenConfigEntry, HavenCoordinator
 
 
@@ -45,7 +45,7 @@ class HavenScene(Scene):
         self._attr_unique_id = f"haven_scene_{scene.id}"
         self._attr_name = scene.name
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(coordinator.location.id))},
+            identifiers={location_identifier(coordinator.location.id)},
         )
         self._attr_extra_state_attributes = {"playground": scene.is_playground}
 
