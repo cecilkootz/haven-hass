@@ -1,0 +1,40 @@
+rename:
+  name: Rename light
+  description: >-
+    Renames an individual Haven light on Haven's servers. Not supported for
+    zones (zones are renamed in the Haven app). Reload the integration
+    afterwards to refresh the device name in Home Assistant.
+  target:
+    entity:
+      integration: haven_lighting
+      domain: light
+  fields:
+    name:
+      name: Name
+      description: The new name for the light.
+      required: true
+      example: Front Palm
+      selector:
+        text:
+
+set_pattern_speed:
+  name: Set pattern speed
+  description: >-
+    Sets the animation speed of a Haven pattern (1 Wave, 2 Wave, Sparkle,
+    Cascade, USA, Warm/Cool/All Colors) on a scale of 1 (slow) to 63 (fast).
+    Has no effect while a solid color is active.
+  target:
+    entity:
+      integration: haven_lighting
+      domain: light
+  fields:
+    speed:
+      name: Speed
+      description: Pattern speed from 1 (slow) to 63 (fast).
+      required: true
+      example: 16
+      selector:
+        number:
+          min: 1
+          max: 63
+          mode: slider
