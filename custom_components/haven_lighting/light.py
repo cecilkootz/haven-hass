@@ -44,8 +44,7 @@ async def async_setup_entry(
     location_device = async_get_location_device(hass, config_entry)
 
     async_add_entities(
-        HavenLight(coordinator, light_id, location_device.id)
-        for light_id in coordinator.data
+        HavenLight(coordinator, key, location_device.id) for key in coordinator.data
     )
 
     # Entity services (documented in services.yaml)
@@ -85,15 +84,17 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
     _attr_name = None
 
     def __init__(
-        self, coordinator: HavenCoordinator, light_id: int, location_device_id: str
+        self, coordinator: HavenCoordinator, key: str, location_device_id: str
     ) -> None:
-        """Initialize a Haven Light."""
-        super().__init__(coordinator, context=light_id)
-        self._light_id = light_id
-        light = coordinator.data[light_id]
-        self._attr_unique_id = f"haven_light_{light_id}"
+        """Initialize a Haven light or zone from its ``Light.key``."""
+        super().__init__(coordinator, context=key)
+        self._key = key
+        light = coordinator.data[key]
+        # "haven_light_<id>" / "haven_zone_<id>": lights and zones are
+        # numbered independently, so the kind must be part of the id.
+        self._attr_unique_id = f"haven_{key}"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, str(light_id))},
+            identifiers={(DOMAIN, key)},
             name=light.name,
             manufacturer="Haven",
             model="Haven Zone" if light.is_zone else "Haven Light",
@@ -102,12 +103,12 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
 
     @property
     def _light(self) -> Light:
-        return self.coordinator.data[self._light_id]
+        return self.coordinator.data[self._key]
 
     @property
     def available(self) -> bool:
         """Return True if the light is still reported by the coordinator."""
-        return super().available and self._light_id in self.coordinator.data
+        return super().available and self._key in self.coordinator.data
 
     @property
     def is_on(self) -> bool:

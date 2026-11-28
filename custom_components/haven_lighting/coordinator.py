@@ -17,7 +17,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
+from .const import location_identifier
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,8 +29,12 @@ UPDATE_INTERVAL = timedelta(seconds=60)
 type HavenConfigEntry = ConfigEntry["HavenCoordinator"]
 
 
-class HavenCoordinator(DataUpdateCoordinator[dict[int, Light]]):
-    """Fetch all lights for one Haven location on a shared schedule."""
+class HavenCoordinator(DataUpdateCoordinator[dict[str, Light]]):
+    """Fetch all lights and zones for one Haven location on a shared schedule.
+
+    Data is keyed by ``Light.key`` ("light_<id>" / "zone_<id>"): lights and
+    zones are numbered independently, so the raw id is not unique.
+    """
 
     config_entry: HavenConfigEntry
 
@@ -53,7 +57,7 @@ class HavenCoordinator(DataUpdateCoordinator[dict[int, Light]]):
         self.location = location
         self.scenes: dict[int, Scene] = {}
 
-    def _fetch_lights(self) -> dict[int, Light]:
+    def _fetch_lights(self) -> dict[str, Light]:
         """Fetch lights, logging in again once if the session has expired.
 
         The client already retries a 401 after a token refresh; when the
@@ -71,7 +75,7 @@ class HavenCoordinator(DataUpdateCoordinator[dict[int, Light]]):
                 raise
             return self.location.get_lights()
 
-    async def _async_update_data(self) -> dict[int, Light]:
+    async def _async_update_data(self) -> dict[str, Light]:
         """Fetch the latest light states for this location."""
         try:
             return await self.hass.async_add_executor_job(self._fetch_lights)
@@ -91,7 +95,7 @@ def async_get_location_device(
     location = config_entry.runtime_data.location
     return dr.async_get(hass).async_get_or_create(
         config_entry_id=config_entry.entry_id,
-        identifiers={(DOMAIN, str(location.id))},
+        identifiers={location_identifier(location.id)},
         manufacturer="Haven",
         name=location.name or "Haven Lighting",
         model="Haven Location",
