@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import logging
 
 import pytest
 
@@ -45,12 +46,12 @@ async def test_setup_creates_lights_zones_and_scenes(
     hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Every light, zone and scene becomes an entity without errors."""
+    """Every light, zone and scene becomes an entity of one Home device."""
     await _setup(hass, config_entry)
 
     assert config_entry.state is ConfigEntryState.LOADED
     assert "ERROR" not in [r.levelname for r in caplog.records]
-    assert len(hass.states.async_all("light")) == 3
+    assert len(hass.states.async_all("light")) == 4
     assert len(hass.states.async_all("scene")) == 1
 
     palm = hass.states.get(_entity_id(hass, "light", "haven_light_1"))
@@ -64,10 +65,25 @@ async def test_setup_creates_lights_zones_and_scenes(
     path = hass.states.get(_entity_id(hass, "light", "haven_light_2"))
     assert path.state == STATE_OFF
 
-    zone_device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, "zone_7"), config_entry.entry_id
+    devices = dr.async_entries_for_config_entry(
+        dr.async_get(hass), config_entry.entry_id
     )
-    assert zone_device is not None and zone_device.model == "Haven Zone"
+    assert [(d.name, d.model) for d in devices] == [("Home", "Haven Location")]
+    entity_registry = er.async_get(hass)
+    for entry in er.async_entries_for_config_entry(
+        entity_registry, config_entry.entry_id
+    ):
+        assert entry.device_id == devices[0].id
+
+    def friendly(unique_id: str) -> str:
+        state = hass.states.get(_entity_id(hass, "light", unique_id))
+        return state.attributes["friendly_name"]
+
+    # ALL ZONES is the Home device's own light; the rest are named after
+    # themselves
+    assert friendly("haven_zone_9") == "Home"
+    assert friendly("haven_zone_7") == "Home Pool Zone"
+    assert friendly("haven_light_1") == "Home Front Palm"
 
 
 async def test_scene_lives_on_location_device(
@@ -83,7 +99,7 @@ async def test_scene_lives_on_location_device(
     )
     assert entry.device_id == location.id
     assert hass.states.get(entity_id).attributes["friendly_name"] == (
-        "Pat Doe Movie Night"
+        "Home Movie Night"
     )
 
     await hass.services.async_call(
@@ -191,18 +207,16 @@ async def test_command_failure_raises_home_assistant_error(
 async def test_services(
     hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry
 ) -> None:
-    """rename updates Haven and the device; zones are refused."""
+    """rename updates Haven and the entity name; zones are refused."""
     await _setup(hass, config_entry)
     light_id = _entity_id(hass, "light", "haven_light_1")
 
     await hass.services.async_call(
         DOMAIN, "rename", {"entity_id": light_id, "name": "Big Palm"}, blocking=True
     )
+    await hass.async_block_till_done()
     assert cloud.renames == [{"lightId": 1, "name": "Big Palm", "pinName": None}]
-    device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, "light_1"), config_entry.entry_id
-    )
-    assert device.name == "Big Palm"
+    assert hass.states.get(light_id).attributes["friendly_name"] == "Home Big Palm"
 
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
@@ -367,20 +381,11 @@ async def test_zone_and_light_with_the_same_id_both_appear(
     )
     await _setup(hass, config_entry)
 
-    assert len(hass.states.async_all("light")) == 4
+    assert len(hass.states.async_all("light")) == 5
     palm = _entity_id(hass, "light", "haven_light_1")
     garden = _entity_id(hass, "light", "haven_zone_1")
-    assert hass.states.get(palm).attributes["friendly_name"] == "Front Palm"
-    assert hass.states.get(garden).attributes["friendly_name"] == "Garden Zone"
-
-    device_registry = dr.async_get(hass)
-    light_device = device_registry.async_get_device_by_identifier(
-        (DOMAIN, "light_1"), config_entry.entry_id
-    )
-    zone_device = device_registry.async_get_device_by_identifier(
-        (DOMAIN, "zone_1"), config_entry.entry_id
-    )
-    assert light_device.id != zone_device.id
+    assert hass.states.get(palm).attributes["friendly_name"] == "Home Front Palm"
+    assert hass.states.get(garden).attributes["friendly_name"] == "Home Garden Zone"
 
     await hass.services.async_call(
         "light", "turn_on", {"entity_id": garden}, blocking=True
@@ -394,65 +399,168 @@ async def test_zone_and_light_with_the_same_id_both_appear(
     assert cloud.commands[-1]["selectedZoneIds"] == []
 
 
-async def test_upgrade_migrates_zone_ids_and_removes_old_devices(
+def _old_device(hass, entry, identifier, **kwargs):
+    return dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, identifier)}, **kwargs
+    )
+
+
+def _old_light_entity(hass, entry, unique_id, device, object_id):
+    return er.async_get(hass).async_get_or_create(
+        "light", DOMAIN, unique_id, config_entry=entry,
+        device_id=device.id, suggested_object_id=object_id,
+    ).entity_id
+
+
+async def _assert_only_home_device(hass, entry, old_devices) -> None:
+    device_registry = dr.async_get(hass)
+    for device_id in old_devices:
+        assert device_registry.async_get(device_id) is None
+    devices = dr.async_entries_for_config_entry(device_registry, entry.entry_id)
+    assert [d.name for d in devices] == ["Home"]
+
+
+async def test_upgrade_from_0_6_keeps_entity_ids(
     hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry
 ) -> None:
-    """Entities from <=0.6 keep their entity_id; bare-number devices go away."""
+    """<=0.6 entities keep their entity_id; the bare-number devices go away."""
     config_entry.add_to_hass(hass)
-    device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
-    old_location = device_registry.async_get_or_create(
-        config_entry_id=config_entry.entry_id,
-        identifiers={(DOMAIN, str(LOCATION_ID))}, name="Pat Doe",
-    )
-    old_devices = {old_location.id}
-    old_entities = {}
-    for unique_id, number, name in (
-        ("haven_light_1", "1", "front_palm"),
-        ("haven_light_7", "7", "pool_zone"),  # a zone under the old scheme
-    ):
-        device = device_registry.async_get_or_create(
-            config_entry_id=config_entry.entry_id,
-            identifiers={(DOMAIN, number)}, via_device_id=old_location.id,
-        )
-        old_devices.add(device.id)
-        old_entities[name] = entity_registry.async_get_or_create(
-            "light", DOMAIN, unique_id, config_entry=config_entry,
-            device_id=device.id, suggested_object_id=name,
-        ).entity_id
+    old_location = _old_device(hass, config_entry, str(LOCATION_ID), name="Pat Doe")
+    palm_device = _old_device(hass, config_entry, "1")
+    zone_device = _old_device(hass, config_entry, "7")  # a zone, old scheme
+    palm = _old_light_entity(hass, config_entry, "haven_light_1", palm_device, "palm")
+    pool = _old_light_entity(hass, config_entry, "haven_light_7", zone_device, "pool")
 
     assert await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
 
-    # same entity ids, now under the kind-prefixed unique ids
-    assert entity_registry.async_get(old_entities["front_palm"]).unique_id == (
-        "haven_light_1"
+    assert entity_registry.async_get(palm).unique_id == "haven_light_1"
+    assert entity_registry.async_get(pool).unique_id == "haven_zone_7"
+    assert len(hass.states.async_all("light")) == 4  # no duplicates
+    await _assert_only_home_device(
+        hass, config_entry, {old_location.id, palm_device.id, zone_device.id}
     )
-    assert entity_registry.async_get(old_entities["pool_zone"]).unique_id == (
-        "haven_zone_7"
-    )
-    assert len(hass.states.async_all("light")) == 3  # no duplicates
-    for device_id in old_devices:
-        assert device_registry.async_get(device_id) is None
-    zone_entry = entity_registry.async_get(old_entities["pool_zone"])
-    zone_device = device_registry.async_get(zone_entry.device_id)
-    assert (DOMAIN, "zone_7") in zone_device.identifiers
 
 
-async def test_stale_device_can_be_removed_from_ui(
+async def test_upgrade_from_0_7_folds_zone_devices_into_home(
     hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry
 ) -> None:
-    """Only devices Haven no longer reports may be deleted by the user."""
+    """0.7.x's device per zone is replaced by entities on the Home device."""
+    config_entry.add_to_hass(hass)
+    location = _old_device(
+        hass, config_entry, f"location_{LOCATION_ID}", name="Pat Doe"
+    )
+    zone_device = _old_device(
+        hass, config_entry, "zone_7", name="Pool Zone", via_device_id=location.id
+    )
+    pool = _old_light_entity(hass, config_entry, "haven_zone_7", zone_device, "pool")
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    entry = er.async_get(hass).async_get(pool)
+    assert entry.device_id == location.id
+    assert dr.async_get(hass).async_get(location.id).name == "Home"
+    await _assert_only_home_device(hass, config_entry, {zone_device.id})
+
+
+async def test_only_the_home_device_is_protected_from_removal(
+    hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry
+) -> None:
+    """The user may delete any leftover device, but not the Home device."""
     await _setup(hass, config_entry)
-    device_registry = dr.async_get(hass)
-    current = device_registry.async_get_device_by_identifier(
-        (DOMAIN, "light_1"), config_entry.entry_id
+    home = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"location_{LOCATION_ID}"), config_entry.entry_id
     )
-    gone = device_registry.async_get_or_create(
-        config_entry_id=config_entry.entry_id, identifiers={(DOMAIN, "light_99")}
-    )
+    leftover = _old_device(hass, config_entry, "zone_99")
 
     from custom_components.haven_lighting import async_remove_config_entry_device
 
-    assert not await async_remove_config_entry_device(hass, config_entry, current)
-    assert await async_remove_config_entry_device(hass, config_entry, gone)
+    assert not await async_remove_config_entry_device(hass, config_entry, home)
+    assert await async_remove_config_entry_device(hass, config_entry, leftover)
+
+
+async def _advance(hass: HomeAssistant, freezer: FrozenDateTimeFactory, seconds) -> None:
+    freezer.tick(timedelta(seconds=seconds))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+
+async def test_commanded_state_survives_a_lagging_cloud(
+    hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """The toggle must not flip back while Haven's cloud still reports the
+    old state (the reported 'shows off, but on' bug)."""
+    await _setup(hass, config_entry)
+    all_zones = _entity_id(hass, "light", "haven_zone_9")
+    cloud.lag = True
+    reads_before = cloud.list_reads
+
+    await hass.services.async_call(
+        "light", "turn_on", {"entity_id": all_zones}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(all_zones).state == STATE_ON
+    assert cloud.list_reads == reads_before  # no immediate, stale re-read
+
+    # the post-command re-read still sees "off": keep showing "on"
+    await _advance(hass, freezer, 11)
+    assert cloud.list_reads == reads_before + 1
+    assert hass.states.get(all_zones).state == STATE_ON
+
+    # the cloud catches up; later polls agree and the hold is released
+    cloud.release_commands()
+    await _advance(hass, freezer, 61)
+    assert hass.states.get(all_zones).state == STATE_ON
+    cloud.lights[3]["lightingStatusId"] = 1  # turned off in the Haven app
+    await _advance(hass, freezer, 61)
+    assert hass.states.get(all_zones).state == STATE_OFF
+
+
+async def test_cloud_wins_once_the_hold_expires(
+    hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """If Haven never reports the commanded state, its answer wins."""
+    await _setup(hass, config_entry)
+    path = _entity_id(hass, "light", "haven_light_2")
+    cloud.lag = True  # the command never takes effect
+
+    await hass.services.async_call(
+        "light", "turn_on", {"entity_id": path}, blocking=True
+    )
+    assert hass.states.get(path).state == STATE_ON
+    await _advance(hass, freezer, 11)
+    assert hass.states.get(path).state == STATE_ON
+    await _advance(hass, freezer, 61)
+    assert hass.states.get(path).state == STATE_OFF
+
+
+async def test_turn_off_holds_off(
+    hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Turning off is held the same way as turning on."""
+    await _setup(hass, config_entry)
+    palm = _entity_id(hass, "light", "haven_light_1")
+    cloud.lag = True
+    await hass.services.async_call(
+        "light", "turn_off", {"entity_id": palm}, blocking=True
+    )
+    await _advance(hass, freezer, 11)
+    assert hass.states.get(palm).state == STATE_OFF
+    cloud.release_commands()
+    await _advance(hass, freezer, 61)
+    assert hass.states.get(palm).state == STATE_OFF
+
+
+async def test_debug_log_shows_reported_state(
+    hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Debug logging records what Haven reports, to diagnose state issues."""
+    caplog.set_level(logging.DEBUG, logger="custom_components.haven_lighting")
+    await _setup(hass, config_entry)
+    assert "Haven reports zone_9 (ALL ZONES): on=False status=1" in caplog.text

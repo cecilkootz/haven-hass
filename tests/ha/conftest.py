@@ -35,6 +35,8 @@ class FakeHavenCloud:
              "lightBrightnessId": 10, "colorId": 81},
             {"id": 7, "name": "Pool Zone", "isZone": True,
              "lightingStatusId": 2, "lightBrightnessId": 10, "colorId": 1},
+            {"id": 9, "name": "ALL ZONES", "isZone": True,
+             "lightingStatusId": 1, "lightBrightnessId": 10, "colorId": 1},
         ]
         self.scenes: list[dict[str, Any]] = [
             {"id": 31, "name": "Movie Night", "isPlayGroundScene": False},
@@ -44,8 +46,34 @@ class FakeHavenCloud:
         self.fail_lights: Exception | None = None
         self.fail_commands: Exception | None = None
         self.fail_auth: Exception | None = None
+        # When True, commands are accepted but the reported state only
+        # changes on release_commands(), like Haven's slow-to-update cloud.
+        self.lag = False
+        self.pending: list[dict[str, Any]] = []
+        self.list_reads = 0
         self.renames: list[dict[str, Any]] = []
         self.token_valid = True
+
+    def _apply(self, command: dict[str, Any]) -> None:
+        for item in self.lights:
+            is_zone = bool(item.get("isZone"))
+            item_id = item["id"] if is_zone else item["lightId"]
+            targets = command["selectedZoneIds" if is_zone else "selectedLightIds"]
+            if item_id not in targets:
+                continue
+            for field, key in (
+                ("lightingStatusId", "lightingStatusId"),
+                ("lightBrightnessId", "lightBrightnessId"),
+                ("lightColorId", "colorId"),
+            ):
+                if command[field] != 63:  # 63 = keep the current value
+                    item[key] = command[field]
+
+    def release_commands(self) -> None:
+        """Let the reported state catch up with the commands sent so far."""
+        for command in self.pending:
+            self._apply(command)
+        self.pending.clear()
 
     def request(self, method: str, path: str, auth_required: bool = True,
                 base_url: str = "", **kwargs: Any) -> Any:
@@ -65,6 +93,7 @@ class FakeHavenCloud:
             return {"defaultLocationId": LOCATION_ID, "firstName": "Pat",
                     "lastName": "Doe"}
         if path.startswith("/LightAndZones/OrderedList/"):
+            self.list_reads += 1
             if self.fail_lights:
                 raise self.fail_lights
             return [dict(item) for item in self.lights]
@@ -72,6 +101,10 @@ class FakeHavenCloud:
             if self.fail_commands:
                 raise self.fail_commands
             self.commands.append(body)
+            if self.lag:
+                self.pending.append(body)
+            else:
+                self._apply(body)
             return {"success": True}
         if path.startswith("/Scene/UserScenesByLocation/"):
             return list(self.scenes)

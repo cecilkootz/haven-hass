@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
@@ -18,20 +19,35 @@ from homeassistant.components.light import (
     LightEntity,
     LightEntityFeature,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import (
     AddConfigEntryEntitiesCallback,
     async_get_current_platform,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 from homeassistant.util.color import color_hs_to_RGB
 
 from .brightness import ha_to_haven_brightness, haven_to_ha_brightness
-from .const import DOMAIN
+from .const import location_identifier
 from .coordinator import HavenConfigEntry, HavenCoordinator, async_get_location_device
+
+# Haven's cloud reports a light's new state only some seconds after a command
+# is accepted. For this long after a command, a poll that still shows the old
+# state is treated as stale and the commanded state is kept; after it, the
+# cloud's answer wins.
+OPTIMISTIC_WINDOW = timedelta(seconds=45)
+
+# The zone Haven creates to address every light at once. It is presented as
+# the Home device's own light ("Home") rather than as a separate zone.
+_ALL_ZONES_NAMES = frozenset({"all zones"})
+
+
+def is_all_zones(light: Light) -> bool:
+    """Return whether this is Haven's ALL ZONES zone."""
+    return light.is_zone and light.name.strip().casefold() in _ALL_ZONES_NAMES
 
 
 async def async_setup_entry(
@@ -41,11 +57,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up Haven Light from a config entry."""
     coordinator = config_entry.runtime_data
-    location_device = async_get_location_device(hass, config_entry)
+    # Every light and zone is an entity of the one Home device.
+    async_get_location_device(hass, config_entry)
 
-    async_add_entities(
-        HavenLight(coordinator, key, location_device.id) for key in coordinator.data
-    )
+    async_add_entities(HavenLight(coordinator, key) for key in coordinator.data)
 
     # Entity services (documented in services.yaml)
     platform = async_get_current_platform()
@@ -71,6 +86,10 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
     Colors and animated patterns ride the same lightColorId command field
     (Haven's static catalog, havenlighting.colors): solid colors and white
     temperatures surface as hs_color, animated patterns as effects.
+
+    All lights and zones belong to the location's Home device. ALL ZONES is
+    the device's main light (shown as just "Home"); every other light or
+    zone is named after itself ("Home Drive Way").
     """
 
     _attr_has_entity_name = True
@@ -79,31 +98,78 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
     _attr_supported_color_modes = {ColorMode.HS}
     _attr_supported_features = LightEntityFeature.EFFECT
     _attr_effect_list = sorted(entry.name for entry in PATTERNS.values())
-    # None, not light.name: this entity is the device's only feature, so
-    # has_entity_name + a device name would otherwise show "Kitchen Kitchen".
-    _attr_name = None
 
-    def __init__(
-        self, coordinator: HavenCoordinator, key: str, location_device_id: str
-    ) -> None:
+    def __init__(self, coordinator: HavenCoordinator, key: str) -> None:
         """Initialize a Haven light or zone from its ``Light.key``."""
         super().__init__(coordinator, context=key)
         self._key = key
-        light = coordinator.data[key]
         # "haven_light_<id>" / "haven_zone_<id>": lights and zones are
         # numbered independently, so the kind must be part of the id.
         self._attr_unique_id = f"haven_{key}"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, key)},
-            name=light.name,
-            manufacturer="Haven",
-            model="Haven Zone" if light.is_zone else "Haven Light",
-            via_device_id=location_device_id,
+            identifiers={location_identifier(coordinator.location.id)},
         )
+        # The state a command asked for, kept until the cloud reports it
+        # (see OPTIMISTIC_WINDOW): the commanded Light object, the values
+        # that must match, and when to stop waiting.
+        self._optimistic: Light | None = None
+        self._expected: dict[str, Any] = {}
+        self._optimistic_until: datetime | None = None
+        self._last_name: str | None = None
+
+    @property
+    def name(self) -> str | None:
+        """Name the entity after its light; ALL ZONES is the device itself."""
+        if (light := self.coordinator.data.get(self._key)) is not None:
+            self._last_name = None if is_all_zones(light) else light.name
+        return self._last_name
 
     @property
     def _light(self) -> Light:
+        """The state to show: the commanded one while it settles, else polled."""
+        if self._optimistic is not None:
+            return self._optimistic
         return self.coordinator.data[self._key]
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Drop the commanded state once the cloud agrees or the wait is over."""
+        if self._optimistic is not None:
+            fresh = self.coordinator.data.get(self._key)
+            if (
+                fresh is None
+                or self._matches_expected(fresh)
+                or self._optimistic_until is None
+                or dt_util.utcnow() >= self._optimistic_until
+            ):
+                self._clear_optimistic()
+        super()._handle_coordinator_update()
+
+    def _matches_expected(self, light: Light) -> bool:
+        return all(
+            value is None or getattr(light, attr) == value
+            for attr, value in (
+                ("is_on", self._expected.get("is_on")),
+                ("brightness", self._expected.get("brightness")),
+            )
+        ) and (
+            self._expected.get("color") is None
+            or light._data.color == self._expected["color"]  # noqa: SLF001
+        )
+
+    def _clear_optimistic(self) -> None:
+        self._optimistic = None
+        self._expected = {}
+        self._optimistic_until = None
+
+    @callback
+    def _async_hold_commanded_state(self, light: Light, **expected: Any) -> None:
+        """Show the commanded state now and re-read the cloud once it settles."""
+        self._optimistic = light
+        self._expected = expected
+        self._optimistic_until = dt_util.utcnow() + OPTIMISTIC_WINDOW
+        self.async_write_ha_state()
+        self.coordinator.async_refresh_after_command()
 
     @property
     def available(self) -> bool:
@@ -191,14 +257,15 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
         await self._async_command(
             lambda: light.turn_on(brightness=haven_brightness, color_id=color_id)
         )
-        self.async_write_ha_state()
-        await self.coordinator.async_request_refresh()
+        self._async_hold_commanded_state(
+            light, is_on=True, brightness=haven_brightness, color=color_id
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        await self._async_command(self._light.turn_off)
-        self.async_write_ha_state()
-        await self.coordinator.async_request_refresh()
+        light = self._light
+        await self._async_command(light.turn_off)
+        self._async_hold_commanded_state(light, is_on=False)
 
     async def async_rename(self, name: str) -> None:
         """Rename the light server-side (haven_lighting.rename service).
@@ -213,12 +280,7 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
                 "zones through a separate endpoint not yet supported"
             )
         await self._async_command(light.rename, name)
-        # The device name is only applied when the entity is added; update it
-        # in place so the new name shows without a reload.
-        if self.device_entry is not None:
-            dr.async_get(self.hass).async_update_device(
-                self.device_entry.id, name=name
-            )
+        # The entity name follows the light's name from the next poll.
         await self.coordinator.async_request_refresh()
 
     async def async_set_pattern_speed(self, speed: int) -> None:

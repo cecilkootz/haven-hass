@@ -62,5 +62,5 @@ class HavenScene(Scene):
             raise HomeAssistantError(
                 f"Activating Haven scene {self.scene.name} failed: {err}"
             ) from err
-        # scenes change every light in the location; refresh promptly
-        await self.coordinator.async_request_refresh()
+        # A scene changes every light; re-read once the cloud has caught up.
+        self.coordinator.async_refresh_after_command()
