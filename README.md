@@ -44,7 +44,7 @@ version under test:
 
 ```sh
 pip install pytest-homeassistant==2026.11.3
-pip install "havenlighting@git+https://github.com/cecilkootz/haven-python.git@724d2d86a39016ff86ef5635bef6aba29e8be256"
+pip install "havenlighting@git+https://github.com/cecilkootz/haven-python.git@47e1c0519ed5098a7d16df1d81f483db065e61e4"
 pytest tests/ha
 ```
 

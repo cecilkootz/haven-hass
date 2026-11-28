@@ -34,18 +34,6 @@ from .const import DOMAIN
 from .coordinator import HavenConfigEntry, HavenCoordinator, async_get_location_device
 
 
-def _is_zone(light: Light) -> bool:
-    """Return whether a havenlighting Light is a zone.
-
-    The pinned client only records this on its private LightData (there is
-    no public ``Light.is_zone``), so read it defensively from there.
-    """
-    public = getattr(light, "is_zone", None)
-    if isinstance(public, bool):
-        return public
-    return bool(getattr(light._data, "is_zone", False))  # noqa: SLF001
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: HavenConfigEntry,
@@ -108,7 +96,7 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
             identifiers={(DOMAIN, str(light_id))},
             name=light.name,
             manufacturer="Haven",
-            model="Haven Zone" if _is_zone(light) else "Haven Light",
+            model="Haven Zone" if light.is_zone else "Haven Light",
             via_device_id=location_device_id,
         )
 
@@ -218,7 +206,7 @@ class HavenLight(CoordinatorEntity[HavenCoordinator], LightEntity):
         app manages separately, and their ids must not be sent as lightId.
         """
         light = self._light
-        if _is_zone(light):
+        if light.is_zone:
             raise ServiceValidationError(
                 "Zones cannot be renamed through this service; Haven renames "
                 "zones through a separate endpoint not yet supported"

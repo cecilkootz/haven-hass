@@ -43,6 +43,7 @@ class FakeHavenCloud:
         self.scene_runs: list[int] = []
         self.fail_lights: Exception | None = None
         self.fail_commands: Exception | None = None
+        self.fail_auth: Exception | None = None
         self.renames: list[dict[str, Any]] = []
         self.token_valid = True
 
@@ -50,6 +51,8 @@ class FakeHavenCloud:
                 base_url: str = "", **kwargs: Any) -> Any:
         body = kwargs.get("json")
         if path == "/Auth/authenticate":
+            if self.fail_auth:
+                raise self.fail_auth
             if body["password"] != self.password:
                 raise ApiError("Invalid credentials", code=400)
             self.token_valid = True

@@ -330,3 +330,29 @@ async def test_translations_ship_for_custom_integration(hass: HomeAssistant) -> 
     prefix = f"component.{DOMAIN}.config"
     assert strings[f"{prefix}.step.user.data.email"] == "Email"
     assert strings[f"{prefix}.error.invalid_auth"] == "Invalid authentication"
+
+
+async def test_haven_unreachable_at_startup_retries(
+    hass: HomeAssistant, cloud: FakeHavenCloud, config_entry: MockConfigEntry
+) -> None:
+    """An outage during setup retries later instead of asking to reauth."""
+    cloud.fail_auth = ApiError("Request failed: Could not resolve host")
+    config_entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert config_entry.state is ConfigEntryState.SETUP_RETRY
+    assert not hass.config_entries.flow.async_progress()
+
+
+async def test_user_flow_cannot_connect(
+    hass: HomeAssistant, cloud: FakeHavenCloud
+) -> None:
+    """An outage while adding the account says so instead of "invalid auth"."""
+    cloud.fail_auth = ApiError("Service Unavailable", code=503)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"email": EMAIL, "password": PASSWORD}
+    )
+    assert result["errors"] == {"base": "cannot_connect"}
