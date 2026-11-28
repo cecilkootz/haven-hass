@@ -4,10 +4,12 @@ This integration allows you to control Haven Lighting devices through Home Assis
 
 ## Features
 
-- Automatic discovery of Haven lights
-- Support for on/off control
+- Automatic discovery of Haven lights and zones
+- On/off control
 - Brightness control
-- Location-based organization
+- Color control (Haven's full color and white-temperature catalog)
+- Animated patterns as effects (1/2/3 Wave, Sparkle, Cascade, USA, Warm/Cool/All Colors) with a pattern-speed service
+- Light renaming via the `haven_lighting.rename` service
 
 ## Installation
 
