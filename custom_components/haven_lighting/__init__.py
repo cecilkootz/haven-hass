@@ -10,7 +10,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .coordinator import HavenConfigEntry, HavenCoordinator
 
-PLATFORMS: list[Platform] = [Platform.LIGHT]
+PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.SCENE]
 
 async def async_setup_entry(hass: HomeAssistant, entry: HavenConfigEntry) -> bool:
     """Set up Haven Lighting from a config entry."""
